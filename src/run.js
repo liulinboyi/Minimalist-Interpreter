@@ -1,11 +1,10 @@
-const ast = require('./source.json')
-
-// console.log(ast)
-
 let all = {
     store: [],
     env: []
 }
+
+// let debug = true; // 开启debug模式
+// let step_in = false; // 是否步入函数，是的话，则开始不执行函数体，而是稍后还原作用域，来单独执行函数体每个有效语句
 
 function createEnvironment() {
     let store = {};
@@ -21,9 +20,10 @@ function createEnvironment() {
     };
 }
 
-function createEnclosedEnvironment(outer) {
+function createEnclosedEnvironment(outer, other) {
     let env = createEnvironment();
 
+    env._other = other;
     all.env.push(env)
     return {
         get(key) {
@@ -181,14 +181,14 @@ function applyFunction(fn, args) {
         params
     } = fn;
     let env = fn.env;
-    if (env && params && args) env = encloseEnvironment(params, args, env);
+    if (env && params && args) env = encloseEnvironment(params, args, env, fn);
     if (env && body) return evaluateStatements(body.body, env);
 
     return null;
 }
 
-function encloseEnvironment(params, args, outer) {
-    let env = createEnclosedEnvironment(outer);
+function encloseEnvironment(params, args, outer, other /*fn等信息*/ ) {
+    let env = createEnclosedEnvironment(outer, other);
 
     for (let i = 0; i < params.length; i++) {
         env.set(params[i].name, args[i]);
@@ -202,7 +202,10 @@ function evaluateStatements(statements, env) {
 
     for (let statement of statements) {
         object = run(statement, env);
-        if (object && object.kind === "Return") return object;
+        if (object && object.kind === "Return") {
+            // all.env.pop()
+            return object
+        };
     }
 
     return object.value;
@@ -217,6 +220,12 @@ function get_args(arguments, env) {
 }
 
 
-const env = createEnvironment();
+let env = createEnvironment();
+all.env.push(env)
 
-run(ast, env)
+exports.run_debug = function run_debug(ast, sign) {
+    // if (all.env.length > 0) { // debug模式下，调试，如果all.env里面有env，则使用栈顶env
+    //     env = all.env[all.env.length - 1]
+    // }
+    run(ast, env)
+}
