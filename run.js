@@ -1,4 +1,5 @@
-const ast = require('./source.json')
+// const ast = require('./source.json')
+const ast = require('./source-cache.json')
 
 // console.log(ast)
 
@@ -81,13 +82,84 @@ function evaluateExpression(expression, env) {
                 throw new Error("not found function!")
             }
         }
+        case "MemberExpression": {
+            const object = evaluateExpression(expression.object, env)
+            const property = evaluateExpression(expression.property, env)
+            return object[property]
+        }
+        case "ObjectExpression": {
+            // TODO
+            const res = {}
+            expression.properties.forEach(n => {
+                let key = evaluateExpression(n.key, env)
+                let value = evaluateExpression(n.value, env)
+                res[key] = value
+            })
+            return res
+        }
+        // case "ExpressionStatement": {
+        //     return run_statement([expression], env)
+        // }
+        case "ExpressionStatement": {
+            let i = expression
+            if (i.expression) {
+                if (i.expression.type === 'AssignmentExpression') {
+                    const object = evaluateExpression(i.expression.left.object, env)
+                    const property = evaluateExpression(i.expression.left.property, env)
+
+                    const value = evaluateExpression(i.expression.right, env)
+                    object[property] = value
+                    return value
+                } else {
+                    let args = [];
+                    for (let item of i.expression.arguments) {
+                        args.push(env.get(item.name))
+                    }
+                    let opt = `${i.expression.callee.object.name}.${i.expression.callee.property.name}(${args.join(",")})`
+                    console.log(opt)
+                    return eval(opt)
+                }
+            }
+        }
+        // case "VariableDeclaration": {
+        //     return run_statement([expression], env)
+        // }
+        case "VariableDeclaration": {
+            let i = expression
+            for (let dec of i.declarations) {
+                if (dec.init.type === "CallExpression") { // 执行函数
+                    let call = env.get(dec.init.callee.name);
+                    if (call) {
+                        let args = get_args(dec.init.arguments, env)
+                        let res = evaluateCallExpression(call, args, env);
+                        if (typeof res === "object") { // 可能为{kind: "Return", value: xx}
+                            res = res.value
+                        }
+                        env.set(dec.id.name, res);
+                        return res
+                    } else {
+                        throw new Error("not found function!")
+                    }
+                } else if (dec.init.type === 'BinaryExpression') {
+                    let res = evaluateExpression(dec.init, env);
+                    env.set(dec.id.name, res);
+                    return res
+                } else {
+                    env[dec.id.name] = dec.init;
+                    return dec.init
+                }
+            }
+        }
+        default: {
+            debugger
+        }
     }
 }
 
 function evaluateIdentifier(expression, env) {
     if (!expression.name) return null;
     let identifierValue = env.get(expression.name);
-    if (identifierValue !== undefined /*易错*/ ) return identifierValue;
+    if (identifierValue !== undefined /*易错*/) return identifierValue;
 }
 
 function evaluateBinaryExpression(expression, env) {
@@ -117,7 +189,7 @@ function evaluateIfElseExpression(expression, env) {
 
     if (test && expression.consequent.body) {
         return evaluateStatements(expression.consequent.body, env);
-    } else if (expression.alternative /*else 可能函数内部调用函数*/ ) {
+    } else if (expression.alternative /*else 可能函数内部调用函数*/) {
         return evaluateStatements(expression.alternative.statements, env);
     }
 
@@ -137,35 +209,11 @@ function run_statement(statements, env) {
                 break;
             }
             case "VariableDeclaration": {
-                for (let dec of i.declarations) {
-                    if (dec.init.type === "CallExpression") { // 执行函数
-                        let call = env.get(dec.init.callee.name);
-                        if (call) {
-                            let args = get_args(dec.init.arguments, env)
-                            let res = evaluateCallExpression(call, args, env);
-                            if (typeof res === "object") { // 可能为{kind: "Return", value: xx}
-                                res = res.value
-                            }
-                            env.set(dec.id.name, res);
-                        } else {
-                            throw new Error("not found function!")
-                        }
-                    } else {
-                        env[dec.id.name] = dec.init;
-                    }
-                }
+                evaluateExpression(i, env)
                 break;
             }
             case "ExpressionStatement": { // console.log
-                if (i.expression) {
-                    let args = [];
-                    for (let item of i.expression.arguments) {
-                        args.push(env.get(item.name))
-                    }
-                    let opt = `${i.expression.callee.object.name}.${i.expression.callee.property.name}(${args.join(",")})`
-                    console.log(opt)
-                    eval(opt)
-                }
+                evaluateExpression(i, env)
                 break;
             }
             default: {
@@ -202,10 +250,13 @@ function evaluateStatements(statements, env) {
 
     for (let statement of statements) {
         object = run(statement, env);
-        if (object && object.kind === "Return") return object;
+        if (object && object.kind === "Return") {
+            // console.log(object)
+            break
+        }
     }
 
-    return object.value;
+    return object;
 }
 
 function get_args(arguments, env) {
